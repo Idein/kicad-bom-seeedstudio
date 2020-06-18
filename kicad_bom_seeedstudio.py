@@ -26,7 +26,6 @@ def parse_kicad_xml(input_file):
     * other parts are designated with "MPN"
     """
     components = {}
-    parts = {}
     missing = []
 
     tree = ET.parse(input_file)
@@ -35,23 +34,23 @@ def parse_kicad_xml(input_file):
         name = f.attrib['ref']
         info = {}
         fields = f.find('fields')
-        opl, mpn = None, None
+        mpn, link = None, None
         if fields is not None:
             for x in fields:
-                if x.attrib['name'].upper() == 'SKU':
-                    opl = x.text
-                elif x.attrib['name'].upper() == 'MPN':
+                if x.attrib['name'] == 'MPN':
                     mpn = x.text
-        if opl:
-            components[name] = opl
-        elif mpn:
-            components[name] = mpn
+                if x.attrib['name'] == 'Link':
+                    link = x.text
+        if name not in components:
+            components[name] = {}
+        if mpn:
+            components[name]['MPN'] = mpn
+            if link:
+                components[name]['Link'] = link
+            else:
+                components[name]['Link'] = ''
         else:
             missing += [name]
-            continue
-        if components[name] not in parts:
-            parts[components[name]] = []
-        parts[components[name]] += [name]
     return components, missing
 
 def write_bom_seeed(output_file_slug, components):
@@ -68,21 +67,23 @@ def write_bom_seeed(output_file_slug, components):
     """
     parts = {}
     for c in components:
-        if components[c] not in parts:
-            parts[components[c]] = []
-        parts[components[c]] += [c]
+        if 'MPN' in components[c]:
+            if components[c]['MPN'] not in parts:
+                parts[components[c]['MPN']] = {'Link': components[c]['Link'], 'pieces': []}
+            parts[components[c]['MPN']]['pieces'] += [c]
 
-    field_names = ['Part/Designator', 'Manufacture Part Number/Seeed SKU', 'Quantity']
+    field_names = ['Designator', 'MPN', 'Qty', 'Link']
     with open("{}.csv".format(output_file_slug), 'w') as csvfile:
         bomwriter = csv.DictWriter(csvfile, fieldnames=field_names, delimiter=',',
                     quotechar='"', quoting=csv.QUOTE_MINIMAL)
         bomwriter.writeheader()
         for p in sorted(parts.keys()):
-            pieces = sorted(parts[p], key=natural_keys)
+            pieces = sorted(parts[p]['pieces'], key=natural_keys)
             designators = ",".join(pieces)
-            bomwriter.writerow({'Part/Designator': designators,
-                                'Manufacture Part Number/Seeed SKU': p,
-                                'Quantity': len(pieces)})
+            bomwriter.writerow({'Designator': designators,
+                                'MPN': p,
+                                'Qty': len(pieces),
+                                'Link': parts[p]['Link']})
 
 
 if __name__ == "__main__":
@@ -92,5 +93,5 @@ if __name__ == "__main__":
     components, missing = parse_kicad_xml(input_file)
     write_bom_seeed(output_file, components)
     if len(missing) > 0:
-        print("** Warning **: there were parts with missing SKU/MFP")
+        print("** Warning **: there were parts with missing MPN")
         print(missing)
